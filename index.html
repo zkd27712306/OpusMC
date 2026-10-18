@@ -7335,61 +7335,118 @@ const Touch = {
 
     // ---- 触屏驱动 UI（背包/箱子/熔炉）----
     const uic = g.ui.canvas;
-    let lpTimer = null, lpFired = false;
+    let lpTimer = null;
+    let gesture = null; // { startX, startY, startSlot, moved, longFired, lastTapT, lastTapSlot }
+
+    const hitSlot = (gx, gy) => {
+      if (!g.ui.screen || !g.ui.screen.slotAt) return null;
+      return g.ui.screen.slotAt(gx, gy);
+    };
 
     uic.addEventListener('touchstart', (e) => {
       if (!this.enabled || !g.ui.screen) return;
       const t = e.changedTouches[0];
       const r = uic.getBoundingClientRect();
-      const scale = g.ui.dpr / g.ui.scale;
-      g.ui.mouse.x = (t.clientX - r.left) * scale;
-      g.ui.mouse.y = (t.clientY - r.top) * scale;
+      const scale = g.ui.canvas.width / g.ui.w;
+      const gx = (t.clientX - r.left) * scale;
+      const gy = (t.clientY - r.top) * scale;
+
+      g.ui.mouse.x = gx;
+      g.ui.mouse.y = gy;
       g.ui.mouse.down = true;
       g.ui.mouse.button = 0;
-      lpFired = false;
-      if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0, false);
+
+      gesture = {
+        startX: gx, startY: gy,
+        startSlot: hitSlot(gx, gy),
+        moved: false,
+        longFired: false,
+        dragMode: false,
+      };
+
+      // 双击检测：两次短按同一格且间隔 < 300ms → 快速移动
+      const now = performance.now();
+      const s = gesture.startSlot;
+      if (s && this._lastTapSlot === s && now - this._lastTapT < 300) {
+        this._lastTapSlot = null;
+        this._lastTapT = 0;
+        // 快速移动（等价 Shift+左键）
+        if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, gx, gy, 0, true);
+        if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, gx, gy, 0);
+        g.ui.mouse.down = false;
+        gesture = null;
+        e.preventDefault();
+        return;
+      }
+      this._lastTapSlot = s;
+      this._lastTapT = now;
+
+      // 立即触发左键按下（拿起/放下整叠），供拖动时使用
+      if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, gx, gy, 0, false);
+
+      // 长按 → 右键（拿一半/放一半）
       if (lpTimer) clearTimeout(lpTimer);
       lpTimer = setTimeout(() => {
-        if (!g.ui.screen || !g.ui.mouse.down) return;
-        lpFired = true;
-        // 长按 = 右键（拿一半 / 放一半）
+        if (!gesture || gesture.moved || g.ui.mouse.down === false) return;
+        gesture.longFired = true;
+        // 撤销刚才的左键按下，改为右键按下
         if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0);
         if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, g.ui.mouse.x, g.ui.mouse.y, 2, false);
       }, 400);
+
       e.preventDefault();
     }, { passive: false });
 
     uic.addEventListener('touchmove', (e) => {
-      if (!this.enabled || !g.ui.screen) return;
+      if (!this.enabled || !g.ui.screen || !gesture) return;
       const t = e.changedTouches[0];
       const r = uic.getBoundingClientRect();
-      const scale = g.ui.dpr / g.ui.scale;
-      const nx = (t.clientX - r.left) * scale;
-      const ny = (t.clientY - r.top) * scale;
-      // 移动超过 6px 视为拖动，取消长按
-      if (Math.abs(nx - g.ui.mouse.x) + Math.abs(ny - g.ui.mouse.y) > 6 && lpTimer) {
-        clearTimeout(lpTimer); lpTimer = null;
+      const scale = g.ui.canvas.width / g.ui.w;
+      const gx = (t.clientX - r.left) * scale;
+      const gy = (t.clientY - r.top) * scale;
+      const dx = gx - gesture.startX, dy = gy - gesture.startY;
+
+      // 超过 6px 视为"拖动"，取消长按、进入拖动分配模式
+      if (!gesture.moved && (Math.abs(dx) + Math.abs(dy)) > 6) {
+        gesture.moved = true;
+        if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+        // 拖动分配：mouseDown 已触发，dragSlots 由 ContainerScreen.mouseMove 收集
+        gesture.dragMode = true;
       }
-      g.ui.mouse.x = nx; g.ui.mouse.y = ny;
-      if (g.ui.screen.mouseMove) g.ui.screen.mouseMove(g.ui, nx, ny);
+
+      g.ui.mouse.x = gx;
+      g.ui.mouse.y = gy;
+      if (g.ui.screen.mouseMove) g.ui.screen.mouseMove(g.ui, gx, gy);
       e.preventDefault();
     }, { passive: false });
 
     uic.addEventListener('touchend', (e) => {
-      if (!this.enabled || !g.ui.screen) return;
+      if (!this.enabled || !g.ui.screen) { gesture = null; return; }
       if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+
       g.ui.mouse.down = false;
-      if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, lpFired ? 2 : 0);
+      if (gesture) {
+        if (gesture.longFired) {
+          // 长按已触发右键：松开右键
+          if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 2);
+        } else {
+          // 短按 / 拖动：松开左键（拖动分配在 mouseUp 里完成）
+          if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0);
+        }
+      }
+      gesture = null;
       e.preventDefault();
     }, { passive: false });
 
     uic.addEventListener('touchcancel', () => {
-      if (!this.enabled || !g.ui.screen) return;
+      if (!this.enabled || !g.ui.screen) { gesture = null; return; }
       if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
       g.ui.mouse.down = false;
-      if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0);
+      if (gesture && g.ui.screen.mouseUp) {
+        g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, gesture.longFired ? 2 : 0);
+      }
+      gesture = null;
     });
-  },
 
   bindButtons(g) {
     const pad = document.getElementById('joyPad'), knob = document.getElementById('joyKnob');
