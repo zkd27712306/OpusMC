@@ -7246,6 +7246,8 @@ const Touch = {
       g.settings.resScale = dpr >= 3 ? 0.5 : (dpr >= 2 ? 0.66 : 0.8);
       if (!g.settings._origRenderDist) g.settings._origRenderDist = g.settings.renderDist;
       g.settings.renderDist = Math.min(g.settings._origRenderDist, 4);
+      if (g.settings._origSens === undefined) g.settings._origSens = g.settings.sens;
+      g.settings.sens = Math.min(g.settings._origSens, 2.0);
       g.applySettings();
       g.resize();
     } else {
@@ -7253,6 +7255,10 @@ const Touch = {
       if (g.settings._origRenderDist) {
         g.settings.renderDist = g.settings._origRenderDist;
         g.settings._origRenderDist = 0;
+      }
+      if (g.settings._origSens !== undefined) {
+        g.settings.sens = g.settings._origSens;
+        g.settings._origSens = undefined;
       }
       g.applySettings();
       g.resize();
@@ -7564,10 +7570,21 @@ Renderer.prototype.playerPreview = function (game, ui, x, y, w, h) {
   gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   return pv.cv;
 };
+
+window.addEventListener('load', async () => {
+  const g = window.game = new Game();
+  try { await g.init(); }
+  catch (e) {
+    console.error(e);
+    const d = document.getElementById('err');
+    d.style.display = 'block';
+    d.textContent = '启动失败：' + (e && e.message || e) + '\n\n请使用最新版 Chrome / Edge / Firefox 浏览器打开，并确保已启用 WebGL2 / 硬件加速。';
+  }
+});
+</script>
 <script>
   // hide boot splash once the title screen is up
   (function wait() { if (window.game && window.game.state !== 'boot') document.getElementById('boot').style.display = 'none'; else setTimeout(wait, 100); })();
-</script>
 </script>
 </body>
 </html>
