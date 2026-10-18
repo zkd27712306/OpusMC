@@ -97,13 +97,31 @@
 
 ## 目录结构
 
-启动游戏.bat                    双击启动
-启动游戏(本地服务器模式).bat     备用启动（需要 Python）
-game/index.html                 游戏入口
-game/js/assets.js               由官方材质打包生成的贴图数据
-game/js/*.js                    游戏源码（世界生成、渲染、实体、界面、存档…）
-tools/build_assets.py           从 26.2.jar 提取并打包材质的脚本
-tools/serve.py                  无缓存本地服务器
+OpusMC/
+├── index.html                   游戏入口（内嵌js）
+├── 启动游戏.bat                  双击启动
+├── 启动游戏(本地服务器模式).bat   备用启动（需要 Python 3）
+├── README.md                     本说明文件
+├── LICENSE                       MIT 许可证（仅适用于源代码）
+├── game/                         游戏本体
+│   ├── index.html                游戏入口
+│   └── js/                       游戏源码
+│       ├── assets.js             官方材质打包生成的贴图数据（版权归 Mojang）
+│       ├── util.js               数学、噪声、随机、矩阵、RLE 等工具
+│       ├── blocks.js             方块/物品注册表、合成配方、熔炉表
+│       ├── world.js              区块存储、地形生成、光照、流体、方块更新
+│       ├── mesher.js             区块网格生成（顶点、UV、AO、光照）
+│       ├── render.js             WebGL2 渲染器（区块、实体、粒子、UI 3D）
+│       ├── entity.js             实体、物理、生物 AI、掉落物、箭、粒子
+│       ├── audio.js              WebAudio 程序化音效与背景音乐
+│       ├── ui.js                 HUD、背包、合成、熔炉、箱子、菜单
+│       ├── save.js               IndexedDB / localStorage 存档
+│       ├── game.js               游戏主控、区块流式加载、交互、渲染调度
+│       ├── screens.js            标题、暂停、选项、进度、统计等界面
+│       └── main.js               输入绑定、启动入口、触屏驱动
+└── tools/                        开发工具（非运行必需）
+    ├── build_assets.py           从 26.2.jar 提取并打包材质
+    └── serve.py                  无缓存本地静态服务器
 
 ## 重新生成材质
 
