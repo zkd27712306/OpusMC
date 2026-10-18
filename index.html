@@ -4983,6 +4983,91 @@ const TUTORIAL = [
   { title: '制作木镐', text: '放下工作台，右键打开它', icon: 'wooden_pickaxe', done: (g) => g.adv.pickaxe },
 ];
 
+// ---------------------------------------------------------------------------
+// 自适应性能：卡的时候自动降档，稳定后缓慢恢复
+// ---------------------------------------------------------------------------
+const AutoPerf = {
+  STEPS: [
+    { res: 1.00, dist: 8, clouds: true,  particles: true,  hand: true  },
+    { res: 0.85, dist: 7, clouds: true,  particles: true,  hand: true  },
+    { res: 0.70, dist: 6, clouds: false, particles: true,  hand: true  },
+    { res: 0.60, dist: 5, clouds: false, particles: true,  hand: false },
+    { res: 0.50, dist: 4, clouds: false, particles: false, hand: false },
+    { res: 0.40, dist: 3, clouds: false, particles: false, hand: false },
+  ],
+  level: 0,
+  fps: 60,
+  lowStreak: 0,
+  highStreak: 0,
+  cooldown: 0,
+  _snapped: false,
+
+  reset() {
+    this.level = 0; this.fps = 60;
+    this.lowStreak = 0; this.highStreak = 0; this.cooldown = 0;
+    this._snapped = false;
+  },
+
+  snapshotUserPrefs(g) {
+    if (this._snapped) return;
+    this._snapped = true;
+    const s = g.settings;
+    s._userRenderDist = s.renderDist;
+    s._userClouds = s.clouds;
+    s._userRes = s.resScale;
+  },
+
+  apply(g) {
+    const step = this.STEPS[this.level];
+    const s = g.settings;
+    s.resScale = Math.min(step.res, s._userRes === undefined ? step.res : s._userRes);
+    const userMax = s._userRenderDist || s.renderDist || 8;
+    s.renderDist = Math.min(userMax, step.dist);
+    s.clouds = step.clouds && (s._userClouds !== false);
+    s.particles = step.particles;
+    s.hand = step.hand;
+    g.applySettings();
+  },
+
+  tick(g, dt) {
+    if (!g || g.state !== 'play' || g.ui.screen) return;
+    if (g.settings.autoPerf === false) return;
+    const fps = g.fps || 60;
+    this.fps = this.fps * 0.85 + fps * 0.15;
+    if (this.cooldown > 0) { this.cooldown -= dt; return; }
+
+    const touch = g.touchMode;
+    const LOW = touch ? 26 : 40;
+    const HIGH = touch ? 50 : 58;
+
+    if (this.fps < LOW) { this.lowStreak++; this.highStreak = 0; }
+    else if (this.fps > HIGH) { this.highStreak++; this.lowStreak = 0; }
+    else { this.lowStreak = 0; this.highStreak = 0; }
+
+    if (this.lowStreak >= 2) {
+      this.lowStreak = 0;
+      if (this.level < this.STEPS.length - 1) {
+        this.level++;
+        this.apply(g);
+        this.cooldown = 3;
+        if (g.ui && g.ui.message) {
+          g.ui.message('性能不足，已自动降低画质（第 ' + (this.level + 1) + ' 档）', '#FFAA00');
+        }
+      }
+    } else if (this.highStreak >= 8) {
+      this.highStreak = 0;
+      if (this.level > 0) {
+        this.level--;
+        this.apply(g);
+        this.cooldown = 5;
+        if (g.ui && g.ui.message) {
+          g.ui.message('性能充足，已自动提升画质（第 ' + (this.level + 1) + ' 档）', '#55FF55');
+        }
+      }
+    }
+  }
+};
+
 class Game {
   constructor() {
     this.settings = Object.assign({
@@ -5048,8 +5133,13 @@ class Game {
   }
   applySettings() {
     const s = this.settings;
-    this.renderer.renderDist = s.renderDist; this.renderer.gamma = s.gamma; this.renderer.showClouds = s.clouds;
-    Sound.setVolume(s.volume); Sound.setMusic(s.music);
+    this.renderer.renderDist = s.renderDist;
+    this.renderer.gamma = s.gamma;
+    this.renderer.showClouds = s.clouds !== false;
+    this.particlesEnabled = s.particles !== false;
+    this.handEnabled = s.hand !== false;
+    Sound.setVolume(s.volume);
+    Sound.setMusic(s.music);
     if (this.renderer.resScale !== s.resScale) { this.renderer.resScale = s.resScale; this.resize(); }
   }
   resize() { this.renderer.resize(); if (this.ui) this.ui.resize(); }
@@ -5118,6 +5208,7 @@ class Game {
     this.ui.open(new LoadingScreen(this, '正在载入世界…'));
     this.worldMeta = meta;
     this.setupWorld(meta.seed);
+    AutoPerf.reset();
     this.world.flat = !!meta.flat;
     this.world.savedChunks = await DB.loadChunks(id);
     this.dirtySaved = new Set();
@@ -5328,6 +5419,8 @@ class Game {
       return;
     }
     if (this.state !== 'play') return;
+    AutoPerf.snapshotUserPrefs(this);
+    AutoPerf.tick(this, dt);
     this.updateChunks(this.touchMode ? 2 : 6);
     if (now - this.lastSave > 45000) { this.lastSave = now; this.saveWorld(true); }
     Sound.updateMusic(true);
@@ -6397,10 +6490,12 @@ class Game {
     this.drawEntities(a, env);
     if (this.state === 'play') this.drawSelection(env);
     // particles
-    const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
-    const up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
-    this.particles.build(r.particleBuf, a, camPos, right, up);
-    r.drawDynamic(r.particleBuf, r.particleGL, env, { noCull: true });
+    if (this.particlesEnabled !== false) {
+      const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
+      const up = [Math.sin(yaw) * Math.sin(pitch), Math.cos(pitch), Math.cos(yaw) * Math.sin(pitch)];
+      this.particles.build(r.particleBuf, a, camPos, right, up);
+      r.drawDynamic(r.particleBuf, r.particleGL, env, { noCull: true });
+    }
     r.drawTranslucent(env);
     r.drawClouds(env, camPos[0], camPos[2]);
     if (this.state === 'play') {
