@@ -6518,7 +6518,7 @@ class Game {
     const swing = lerp(p.limbSwing - p.limbAmt, p.limbSwing, a) * 0.6662, amt = p.limbAmt;
     const l = Math.cos(swing) * 1.4 * amt, r = -l;
     const sw = p.swingT > 0 ? Math.sin((6 - p.swingT + a) / 6 * Math.PI) : 0;
-    return { head: { rx: p.pitch }, rarm: { rx: r * 0.7 - sw * 1.2 }, larm: { rx: l * 0.7 }, rleg: { rx: l }, lleg: { rx: r } };
+    return { head: { rx: p.pitch }, rarm: { rx: r * 0.7 + sw * 1.2 }, larm: { rx: l * 0.7 }, rleg: { rx: l }, lleg: { rx: r } };
   }
   blockMesh(id, meta) {
     if (!this._bm) this._bm = new Map();
