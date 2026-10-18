@@ -5050,7 +5050,6 @@ const AutoPerf = {
         this.level++;
         this.apply(g);
         this.cooldown = 3;
-        // 记录降档时刻，限制最短升档等待
         this.lastDownTime = performance.now();
         if (g.ui && g.ui.message) {
           g.ui.message('性能不足，已自动降低画质（第 ' + (this.level + 1) + ' 档）', '#FFAA00');
@@ -5073,7 +5072,9 @@ const AutoPerf = {
         }
       }
     }
+  }
 };
+
 
 class Game {
   constructor() {
