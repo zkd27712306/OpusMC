@@ -4985,7 +4985,11 @@ const TUTORIAL = [
 
 class Game {
   constructor() {
-    this.settings = Object.assign({ fov: 70, renderDist: 8, sens: 0.35, volume: 0.8, music: 0.45, gamma: 0.5, guiScale: 0, clouds: true, bobbing: true, advTooltips: false, resScale: 1 }, this.loadSettings());
+    this.settings = Object.assign({
+      fov: 70, renderDist: 8, sens: 0.35, touchSens: 0.6,
+      volume: 0.8, music: 0.45, gamma: 0.5, guiScale: 0,
+      clouds: true, bobbing: true, advTooltips: false, resScale: 1
+    }, this.loadSettings());
     this.state = 'boot';
     this.mode = 'survival';
     this.entities = []; this.blockEntities = new Map();
@@ -6332,6 +6336,14 @@ class Game {
     const r = this.renderer, gl = r.gl;
     r.resize();
     gl.viewport(0, 0, r.canvas.width, r.canvas.height);
+    if (typeof Touch !== 'undefined' && Touch.enabled) {
+      const el = document.getElementById('mobileUI');
+      if (el) {
+        const show = this.state === 'play' && !this.ui.screen;
+        el.classList.toggle('hidden', !show);
+        el.style.display = show ? 'block' : 'none';
+      }
+    }
     if (!this.world || this.state === 'boot') { gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); this.ui.draw(); return; }
     if (this.state !== 'play' || (this.ui.screen && this.ui.screen.pauses)) a = 1;
     const p = this.player;
@@ -7211,6 +7223,8 @@ const Touch = {
     const v = document.getElementById('valTouch');
     if (b) b.textContent = this.pref === 'auto' ? '自动' : (this.pref === 'on' ? '开' : '关');
     if (v) v.textContent = this.enabled ? '已开启' : '已关闭';
+    const hb = document.getElementById('mobileHotbarHit');
+    if (hb) hb.style.bottom = document.body.classList.contains('touch') ? '76px' : '8px';
   },
   
   setEnabled(on) {
@@ -7248,6 +7262,44 @@ const Touch = {
 
   bindCanvas(g) {
     const cv = g.canvas;
+
+    // ---- 快捷栏点击层（手机专用，一次性创建）----
+    if (!document.getElementById('mobileHotbarHit')) {
+      const wrap = document.createElement('div');
+      wrap.id = 'mobileHotbarHit';
+      wrap.style.cssText = 'position:absolute;left:50%;bottom:8px;transform:translateX(-50%);' +
+        'display:flex;gap:2px;padding:3px;pointer-events:auto;z-index:100000;';
+      for (let i = 0; i < 9; i++) {
+        const d = document.createElement('div');
+        d.dataset.slot = i;
+        d.style.cssText = 'width:46px;height:46px;background:transparent;' +
+          'border:2px solid transparent;border-radius:2px;touch-action:none;';
+        d.addEventListener('click', () => {
+          const inv = g.player.inv;
+          inv.sel = i;
+          inv.dirty = true;
+          const now = performance.now();
+          if (d._tapT && now - d._tapT < 500) d._taps = (d._taps || 1) + 1;
+          else d._taps = 1;
+          d._tapT = now;
+          if (d._taps >= 3) {
+            d._taps = 0;
+            const s = inv.slots[i];
+            if (s && s.count > 0) {
+              g.dropFromPlayer({ id: s.id, count: 1, dmg: s.dmg || 0 });
+              s.count -= 1;
+              if (s.count <= 0) inv.slots[i] = null;
+              inv.dirty = true;
+            }
+          }
+        });
+        wrap.appendChild(d);
+      }
+      const holder = document.getElementById('mobileUI');
+      if (holder) holder.appendChild(wrap);
+    }
+
+    // ---- 视角拖动 ----
     cv.addEventListener('touchstart', (e) => {
       if (!this.enabled || g.ui.screen || g.state !== 'play') return;
       for (const t of e.changedTouches) {
@@ -7256,11 +7308,13 @@ const Touch = {
       }
       e.preventDefault();
     }, { passive: false });
+
     cv.addEventListener('touchmove', (e) => {
       if (!this.enabled || g.ui.screen || g.state !== 'play') return;
       for (const t of e.changedTouches) {
         if (t.identifier === this.lookId) {
-          const s = g.settings.sens * 0.06 + 0.002;
+          // 手机独立灵敏度
+          const s = (g.settings.touchSens || 0.6) * 0.06 + 0.0008;
           g.player.yaw   -= (t.clientX - this.lx) * s;
           g.player.pitch  = clamp(g.player.pitch - (t.clientY - this.ly) * s, -Math.PI/2+0.001, Math.PI/2-0.001);
           this.lx = t.clientX; this.ly = t.clientY;
@@ -7268,6 +7322,7 @@ const Touch = {
       }
       e.preventDefault();
     }, { passive: false });
+
     const end = (e) => { for (const t of e.changedTouches) if (t.identifier === this.lookId) this.lookId = null; };
     cv.addEventListener('touchend', end);
     cv.addEventListener('touchcancel', end);
