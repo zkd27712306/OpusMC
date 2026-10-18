@@ -7246,8 +7246,6 @@ const Touch = {
       g.settings.resScale = dpr >= 3 ? 0.5 : (dpr >= 2 ? 0.66 : 0.8);
       if (!g.settings._origRenderDist) g.settings._origRenderDist = g.settings.renderDist;
       g.settings.renderDist = Math.min(g.settings._origRenderDist, 4);
-      if (g.settings._origSens === undefined) g.settings._origSens = g.settings.sens;
-      g.settings.sens = Math.min(g.settings._origSens, 2.0);
       g.applySettings();
       g.resize();
     } else {
@@ -7255,10 +7253,6 @@ const Touch = {
       if (g.settings._origRenderDist) {
         g.settings.renderDist = g.settings._origRenderDist;
         g.settings._origRenderDist = 0;
-      }
-      if (g.settings._origSens !== undefined) {
-        g.settings.sens = g.settings._origSens;
-        g.settings._origSens = undefined;
       }
       g.applySettings();
       g.resize();
@@ -7571,20 +7565,226 @@ Renderer.prototype.playerPreview = function (game, ui, x, y, w, h) {
   return pv.cv;
 };
 
-window.addEventListener('load', async () => {
-  const g = window.game = new Game();
-  try { await g.init(); }
-  catch (e) {
-    console.error(e);
-    const d = document.getElementById('err');
-    d.style.display = 'block';
-    d.textContent = '启动失败：' + (e && e.message || e) + '\n\n请使用最新版 Chrome / Edge / Firefox 浏览器打开，并确保已启用 WebGL2 / 硬件加速。';
+/* ======================= 触屏物品拖动（独立模块，不依赖现有 UI 结构） ======================= */
+(function touchItemDrag() {
+  // 等 Touch 和 UI 就绪
+  function init() {
+    if (typeof Touch === 'undefined' || typeof UI === 'undefined' || !UI.cursorEl) {
+      setTimeout(init, 200);
+      return;
+    }
+    const UIx = UI;
+    const Invx = Inv;
+    const Dropsx = Drops;
+    const Playerx = Player;
+    const SFXx = SFX;
+    const Craftx = (typeof Craft !== 'undefined') ? Craft : null;
+
+    // ---- 全局触点记录 ----
+    window.__lastTouch = window.__lastTouch || { x: 0, y: 0 };
+    window.addEventListener('touchstart', (e) => {
+      const t = e.touches[0]; if (t) { window.__lastTouch.x = t.clientX; window.__lastTouch.y = t.clientY; }
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      const t = e.touches[0]; if (t) { window.__lastTouch.x = t.clientX; window.__lastTouch.y = t.clientY; }
+    }, { passive: true });
+
+    // ---- 光标物品跟随手指 ----
+    function positionCursor(clientX, clientY) {
+      if (!UIx.cursorEl) return;
+      UIx.cursorEl.style.left = (clientX - 23) + 'px';
+      UIx.cursorEl.style.top  = (clientY - 23) + 'px';
+    }
+
+    // ---- 找格子：从触摸点向上找最近的 .islot ----
+    function slotAtPoint(clientX, clientY) {
+      const el = document.elementFromPoint(clientX, clientY);
+      if (!el || !el.closest) return null;
+      const s = el.closest('.islot');
+      if (!s || !s.dataset || !s.dataset.c) return null;
+      return { el: s, c: s.dataset.c, i: +s.dataset.i };
+    }
+
+    // ---- 取/放格子内容（兼容你现有 slotGet/slotSet，若无则用 UI 内部） ----
+    function getSlot(c, i) {
+      if (typeof slotGet === 'function') return slotGet(c, i);
+      // 兜底
+      if (c === 'inv') return Playerx.inv.slots[i];
+      if (c === 'craft' && Craftx) return Craftx.grid[i];
+      if (c === 'chest' && UIx.chest) return UIx.chest.slots[i];
+      if (c === 'furnace' && UIx.fur) return i === 0 ? UIx.fur.input : (i === 1 ? UIx.fur.fuel : UIx.fur.out);
+      return null;
+    }
+    function setSlot(c, i, v) {
+      if (typeof slotSet === 'function') { slotSet(c, i, v); return; }
+      if (c === 'inv') { Playerx.inv.slots[i] = v; Playerx.inv.dirty = true; return; }
+      if (c === 'craft' && Craftx) { Craftx.grid[i] = v; return; }
+      if (c === 'chest' && UIx.chest) { UIx.chest.slots[i] = v; return; }
+      if (c === 'furnace' && UIx.fur) {
+        if (i === 0) UIx.fur.input = v; else if (i === 1) UIx.fur.fuel = v; else UIx.fur.out = v;
+      }
+    }
+
+    // ---- 触屏语义：短按=整叠，长按=1 个，拖动=落到目标格 ----
+    function attach(el) {
+      if (el._touchBound) return;
+      el._touchBound = true;
+
+      let pressTimer = 0, longPressed = false, downX = 0, downY = 0;
+      const clearPress = () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = 0; }
+        el._pressTimer = 0;
+        el.classList.remove('touch-active', 'touch-holding');
+        longPressed = false;
+      };
+
+      const doDown = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const t = e.touches[0]; if (!t) return;
+        downX = t.clientX; downY = t.clientY;
+        longPressed = false;
+        el.classList.add('touch-active');
+        pressTimer = setTimeout(() => {
+          longPressed = true;
+          el.classList.remove('touch-holding');
+          // 长按 = 拿 1 个 / 放 1 个（模拟右键）
+          const sl = slotAtPoint(downX, downY);
+          if (sl) applySlot(sl.c, sl.i, true);
+          if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+        }, 400);
+        el._pressTimer = pressTimer;
+        el.classList.add('touch-holding');
+      };
+
+      const doUp = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const wasLong = longPressed;
+        clearPress();
+        if (wasLong) return;
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        const dx = t.clientX - downX, dy = t.clientY - downY;
+        if (dx * dx + dy * dy > 24 * 24) {
+          // 拖动释放：找落点
+          const target = slotAtPoint(t.clientX, t.clientY);
+          if (target) {
+            if (target.c === 'craftout') { if (Craftx) { Craftx.take(1); UIx.refreshAll && UIx.refreshAll(); } return; }
+            applySlot(target.c, target.i, false);
+          } else {
+            // 面板外丢弃
+            if (UIx.held) {
+              Dropsx.spawnStack(UIx.held, Playerx.pos.x + 0.5, Playerx.pos.y + 1.2, Playerx.pos.z + 0.5);
+              UIx.held = null;
+              UIx.refreshCursor && UIx.refreshCursor();
+            }
+          }
+          return;
+        }
+        // 短按
+        const sl = slotAtPoint(t.clientX, t.clientY);
+        if (sl) applySlot(sl.c, sl.i, false);
+      };
+
+      el.addEventListener('touchstart', doDown, { passive: false });
+      el.addEventListener('touchend', doUp, { passive: false });
+      el.addEventListener('touchcancel', (e) => { e.preventDefault(); clearPress(); }, { passive: false });
+      el.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const t = e.touches[0]; if (!t) return;
+        positionCursor(t.clientX, t.clientY);
+      }, { passive: false });
+    }
+
+    // ---- 核心：点一个格子（right=长按语义） ----
+    function applySlot(c, i, right) {
+      const cur = getSlot(c, i);
+      const max = cur ? (typeof itemStackMax === 'function' ? itemStackMax(cur.id) : 64) : 64;
+
+      if (!UIx.held) {
+        if (!cur) return;
+        if (right) {
+          UIx.held = { id: cur.id, count: 1, dmg: cur.dur };
+          cur.count -= 1;
+          if (cur.count <= 0) setSlot(c, i, null);
+        } else {
+          UIx.held = cur;
+          setSlot(c, i, null);
+        }
+      } else {
+        if (!cur) {
+          if (right) {
+            setSlot(c, i, { id: UIx.held.id, count: 1, dmg: UIx.held.dmg });
+            UIx.held.count -= 1;
+            if (UIx.held.count <= 0) UIx.held = null;
+          } else {
+            setSlot(c, i, UIx.held);
+            UIx.held = null;
+          }
+        } else if (cur.id === UIx.held.id && max > 1) {
+          const put = Math.min(max - cur.count, UIx.held.count, right ? 1 : 999);
+          cur.count += put;
+          UIx.held.count -= put;
+          if (UIx.held.count <= 0) UIx.held = null;
+        } else {
+          setSlot(c, i, UIx.held);
+          UIx.held = cur;
+        }
+      }
+      if (SFXx && SFXx.play) SFXx.play('click', 'wood', 0.35);
+      if (UIx.refreshAll) UIx.refreshAll();
+      if (UIx.held) {
+        const lt = window.__lastTouch;
+        if (lt) positionCursor(lt.x, lt.y);
+      }
+    }
+
+    // ---- 观察 DOM：格子出现/重建时自动绑定 ----
+    const OBSERVE = ['#screenInv', '#screenFurnace', '#screenChest', '#screenPicker'];
+    function scan() {
+      for (const sel of OBSERVE) {
+        const root = document.querySelector(sel);
+        if (!root) continue;
+        root.querySelectorAll('.islot').forEach(attach);
+      }
+    }
+    scan();
+
+    const mo = new MutationObserver(() => scan());
+    for (const sel of OBSERVE) {
+      const root = document.querySelector(sel);
+      if (root) mo.observe(root, { childList: true, subtree: true });
+      else {
+        // 若容器还没插进 DOM，观察 body
+        if (!mo._bodyWatched) {
+          mo._bodyWatched = true;
+          mo.observe(document.body, { childList: true, subtree: true });
+        }
+      }
+    }
+
+    // 光标物品全局跟随
+    window.addEventListener('touchmove', (e) => {
+      if (!UIx.held) return;
+      const t = e.touches[0]; if (!t) return;
+      positionCursor(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
+
+    // 关闭面板时清理
+    const origClose = UIx.closeAll;
+    if (origClose) {
+      UIx.closeAll = function () {
+        document.querySelectorAll('.islot').forEach(el => {
+          if (el._pressTimer) { clearTimeout(el._pressTimer); el._pressTimer = 0; }
+          el.classList.remove('touch-active', 'touch-holding');
+        });
+        return origClose.apply(this, arguments);
+      };
+    }
   }
-});
-</script>
-<script>
-  // hide boot splash once the title screen is up
-  (function wait() { if (window.game && window.game.state !== 'boot') document.getElementById('boot').style.display = 'none'; else setTimeout(wait, 100); })();
+  if (document.readyState === 'complete') setTimeout(init, 300);
+  else window.addEventListener('load', () => setTimeout(init, 300));
+})();
 </script>
 </body>
 </html>
