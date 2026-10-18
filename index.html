@@ -7247,7 +7247,7 @@ const Touch = {
       if (!g.settings._origRenderDist) g.settings._origRenderDist = g.settings.renderDist;
       g.settings.renderDist = Math.min(g.settings._origRenderDist, 4);
       if (g.settings._origSens === undefined) g.settings._origSens = g.settings.sens;
-      g.settings.sens = Math.min(g.settings._origSens, 0.5);
+      g.settings.sens = Math.min(g.settings._origSens, 1.5);
       g.applySettings();
       g.resize();
     } else {
