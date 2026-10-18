@@ -7206,11 +7206,14 @@ const Touch = {
   setEnabled(on) {
     const g = this.game; if (!g) return;
     on = !!on;
-    if (on === this.enabled) { this.syncButton(); return; }
-    this.enabled = on; g.touchMode = on;
+    this.enabled = on;
+    g.touchMode = on;
     document.body.classList.toggle('touch', on);
     const el = document.getElementById('mobileUI');
-    if (el) el.classList.toggle('hidden', !on);
+    if (el) {
+      el.classList.toggle('hidden', !on);
+      el.style.display = on ? 'block' : 'none';
+    }
     if (on) { this.bindButtons(g); g.suppressPause = true; }
     this.syncButton();
   },
