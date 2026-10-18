@@ -13,10 +13,19 @@
   #err { position: absolute; left: 10%; top: 30%; width: 80%; color: #fff; font: 18px sans-serif; white-space: pre-wrap; display: none; text-align: center; }
   #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font: 16px "Microsoft YaHei", sans-serif; background: #ef323d; }
   /* ---- 触屏 UI ---- */
-  #mobileUI { position: fixed; inset: 0; z-index: 26; pointer-events: none;
-              opacity: 1; transition: opacity .15s; display: none; }
-  #mobileUI:not(.hidden) { display: block; }
-  #mobileUI.hidden { display: none !important; }
+#mobileUI {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 99999;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity .15s;
+  display: none;
+  overflow: hidden;
+}
+#mobileUI:not(.hidden) { display: block; }
+#mobileUI.hidden { display: none !important; }
   #mobileUI .mbtn { pointer-events: auto; display: flex; align-items: center; justify-content: center;
     width: 66px; height: 66px; border-radius: 50%; background: rgba(18,20,24,.44);
     border: 2px solid rgba(255,255,255,.38); color: #fff; font-size: 15px;
@@ -7206,14 +7215,11 @@ const Touch = {
   setEnabled(on) {
     const g = this.game; if (!g) return;
     on = !!on;
-    this.enabled = on;
-    g.touchMode = on;
+    if (on === this.enabled) { this.syncButton(); return; }
+    this.enabled = on; g.touchMode = on;
     document.body.classList.toggle('touch', on);
     const el = document.getElementById('mobileUI');
-    if (el) {
-      el.classList.toggle('hidden', !on);
-      el.style.display = on ? 'block' : 'none';
-    }
+    if (el) el.classList.toggle('hidden', !on);
     if (on) { this.bindButtons(g); g.suppressPause = true; }
     this.syncButton();
   },
@@ -7434,96 +7440,10 @@ window.addEventListener('load', async () => {
     d.textContent = '启动失败：' + (e && e.message || e) + '\n\n请使用最新版 Chrome / Edge / Firefox 浏览器打开，并确保已启用 WebGL2 / 硬件加速。';
   }
 });
-
-/* ======================= 手机触屏自检 ======================= */
-(function touchSelfCheck() {
-  const lines = [];
-  function L(k, v) { lines.push(k + ': ' + v); }
-
-  function run() {
-    L('UA', (navigator.userAgent || '').slice(0, 80));
-    L('maxTouchPoints', navigator.maxTouchPoints);
-    let coarse = '?', noHover = '?';
-    try { coarse = matchMedia('(pointer: coarse)').matches; } catch (e) {}
-    try { noHover = matchMedia('(hover: none)').matches; } catch (e) {}
-    L('pointer:coarse', coarse);
-    L('hover:none', noHover);
-    L('innerW x innerH', innerWidth + ' x ' + innerHeight);
-    L('typeof Touch', typeof Touch);
-
-    const m = document.getElementById('mobileUI');
-    L('mobileUI 存在', !!m);
-    if (m) {
-      L('className', m.className || '(空)');
-      L('inline display', m.style.display || '(空)');
-      L('computed display', getComputedStyle(m).display);
-      L('innerHTML 长度', m.innerHTML.length);
-      L('childElementCount', m.childElementCount);
-      const btn = m.querySelector('.mbtn');
-      if (btn) {
-        const r = btn.getBoundingClientRect();
-        L('.mbtn rect', (r.width|0) + 'x' + (r.height|0) + ' @' + (r.x|0) + ',' + (r.y|0));
-        L('.mbtn computed display', getComputedStyle(btn).display);
-        L('.mbtn opacity', getComputedStyle(btn).opacity);
-        L('.mbtn bg', getComputedStyle(btn).backgroundColor);
-        const cx = r.x + r.width/2, cy = r.y + r.height/2;
-        const hit = document.elementFromPoint(cx, cy);
-        L('按钮中心命中', hit ? (hit.id || hit.className || hit.tagName) : 'null');
-      } else {
-        L('.mbtn', '不存在（DOM 缺失）');
-      }
-    }
-
-    if (typeof Touch !== 'undefined') {
-      L('Touch.pref', Touch.pref);
-      L('Touch.forced', Touch.forced);
-      L('Touch.enabled', Touch.enabled);
-      try { L('Touch.detectMobile()', Touch.detectMobile()); } catch (e) { L('detectMobile 报错', e.message); }
-      try {
-        Touch.setEnabled(true);
-        L('setEnabled(true)', '调用成功');
-      } catch (e) {
-        L('setEnabled(true) 报错', e.message);
-      }
-      const m2 = document.getElementById('mobileUI');
-      if (m2) {
-        L('强制开后 className', m2.className || '(空)');
-        L('强制开后 display', getComputedStyle(m2).display);
-        const b2 = m2.querySelector('.mbtn');
-        if (b2) {
-          const r2 = b2.getBoundingClientRect();
-          L('强制开后 .mbtn rect', (r2.width|0) + 'x' + (r2.height|0) + ' @' + (r2.x|0) + ',' + (r2.y|0));
-          const cx2 = r2.x + r2.width/2, cy2 = r2.y + r2.height/2;
-          const hit2 = document.elementFromPoint(cx2, cy2);
-          L('强制开后按钮命中', hit2 ? (hit2.id || hit2.className || hit2.tagName) : 'null');
-        }
-      }
-    } else {
-      L('Touch', '未定义（main.js 里 Touch 模块没加载）');
-    }
-
-    L('localStorage.mcjs.touchPref', (function(){ try { return localStorage.getItem('mcjs.touchPref'); } catch(e){ return '读取失败'; } })());
-    L('body.className', document.body.className || '(空)');
-
-    const box = document.createElement('div');
-    box.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483647;' +
-      'background:rgba(0,0,0,.94);color:#0f0;font:12px/1.55 monospace;' +
-      'padding:12px;white-space:pre-wrap;overflow:auto;-webkit-user-select:text;user-select:text';
-    box.textContent = '【触屏自检】\n' + lines.join('\n') +
-      '\n\n（点一下关闭；长按可复制）\n';
-    box.addEventListener('click', () => box.remove());
-    document.body.appendChild(box);
-  }
-
-  let tries = 0;
-  const timer = setInterval(() => {
-    tries++;
-    if (typeof Touch !== 'undefined' || tries > 30) {
-      clearInterval(timer);
-      setTimeout(run, 600);
-    }
-  }, 100);
-})();
+</script>
+<script>
+  // hide boot splash once the title screen is up
+  (function wait() { if (window.game && window.game.state !== 'boot') document.getElementById('boot').style.display = 'none'; else setTimeout(wait, 100); })();
 </script>
 </body>
 </html>
