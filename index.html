@@ -5037,24 +5037,32 @@ const AutoPerf = {
     if (this.cooldown > 0) { this.cooldown -= dt; return; }
 
     const touch = g.touchMode;
-    const LOW = touch ? 26 : 40;
-    const HIGH = touch ? 50 : 58;
+    const LOW  = touch ? 26 : 40;
+    const HIGH = touch ? 55 : 60;
+    const HIGH_STREAK = touch ? 15 : 20;
 
     if (this.fps < LOW) { this.lowStreak++; this.highStreak = 0; }
-    else if (this.fps > HIGH) { this.highStreak++; this.lowStreak = 0; }
+    else if (this.fps >= HIGH) { this.highStreak++; this.lowStreak = 0; }
     else { this.lowStreak = 0; this.highStreak = 0; }
-
     if (this.lowStreak >= 2) {
       this.lowStreak = 0;
       if (this.level < this.STEPS.length - 1) {
         this.level++;
         this.apply(g);
         this.cooldown = 3;
+        // 记录降档时刻，限制最短升档等待
+        this.lastDownTime = performance.now();
         if (g.ui && g.ui.message) {
           g.ui.message('性能不足，已自动降低画质（第 ' + (this.level + 1) + ' 档）', '#FFAA00');
         }
       }
-    } else if (this.highStreak >= 8) {
+    }
+    else if (this.highStreak >= HIGH_STREAK) {
+      const sinceDown = this.lastDownTime ? (performance.now() - this.lastDownTime) : Infinity;
+      if (sinceDown < 30000) {
+        this.highStreak = 0;
+        return;
+      }
       this.highStreak = 0;
       if (this.level > 0) {
         this.level--;
@@ -5065,7 +5073,6 @@ const AutoPerf = {
         }
       }
     }
-  }
 };
 
 class Game {
