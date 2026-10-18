@@ -43,11 +43,40 @@
   body.touch #hotbar { bottom: 76px; }
   body.touch #bars   { bottom: 140px; }
   body.touch #itemname { bottom: 130px; }
+
+  /* ---- DOM 快捷栏（触屏可点，桌面隐藏） ---- */
+  #hotbar { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%);
+            display: none; gap: 2px; z-index: 500; pointer-events: none;
+            background: rgba(0,0,0,0.35); padding: 3px; border-radius: 4px; }
+  #hotbar .slot { position: relative; width: 44px; height: 44px;
+                  border: 2px solid rgba(255,255,255,0.35); border-radius: 4px;
+                  background: rgba(18,20,24,0.5); pointer-events: auto;
+                  user-select: none; -webkit-tap-highlight-color: transparent;
+                  touch-action: none; }
+  #hotbar .slot.sel { border-color: #fff; background: rgba(140,200,255,0.35); }
+  #hotbar .slot .num { position: absolute; right: 2px; bottom: 0;
+                       font: 11px "Microsoft YaHei", sans-serif; color: #ddd;
+                       text-shadow: 1px 1px 0 #000; pointer-events: none; }
+  #hotbar .slot canvas.icon { position: absolute; inset: 0; margin: auto;
+                              width: 100%; height: 100%; pointer-events: none;
+                              image-rendering: pixelated; }
+  body.touch #hotbar { display: flex; }
 </style>
 </head>
 <body>
 <canvas id="gl"></canvas>
 <canvas id="ui"></canvas>
+<div id="hotbar" class="hotbar">
+  <div class="slot" data-slot="0"><span class="num">1</span></div>
+  <div class="slot" data-slot="1"><span class="num">2</span></div>
+  <div class="slot" data-slot="2"><span class="num">3</span></div>
+  <div class="slot" data-slot="3"><span class="num">4</span></div>
+  <div class="slot" data-slot="4"><span class="num">5</span></div>
+  <div class="slot" data-slot="5"><span class="num">6</span></div>
+  <div class="slot" data-slot="6"><span class="num">7</span></div>
+  <div class="slot" data-slot="7"><span class="num">8</span></div>
+  <div class="slot" data-slot="8"><span class="num">9</span></div>
+</div>
 <input id="textinput" type="text" autocomplete="off" spellcheck="false">
 <div id="boot">Minecraft JS 复刻版 · 正在加载…</div>
 <div id="err"></div>
@@ -4127,9 +4156,11 @@ class UI {
       c.globalCompositeOperation = 'source-over';
     }
     const hx = Math.floor(W / 2 - 91), hy = H - 22;
-    this.sprite('hotbar', hx, hy);
-    this.sprite('hotbar_sel', hx - 1 + p.inv.sel * 20, hy - 1);
-    for (let i = 0; i < 9; i++) this.drawItem(p.inv.slots[i], hx + 3 + i * 20, hy + 3);
+    if (!g.touchMode) {
+      this.sprite('hotbar', hx, hy);
+      this.sprite('hotbar_sel', hx - 1 + p.inv.sel * 20, hy - 1);
+      for (let i = 0; i < 9; i++) this.drawItem(p.inv.slots[i], hx + 3 + i * 20, hy + 3);
+    }
     if (!p.creative) {
       // xp bar
       const xb = H - 29;
@@ -5012,6 +5043,7 @@ class Game {
     this.renderer.buildIcons();
     this.ui = new UI(this, document.getElementById('ui'));
     this.particles = new Particles(this);
+    if (typeof HUD !== 'undefined') HUD.init(this);
     Touch.init(this);
     this.applySettings();
     await DB.open();
@@ -5379,6 +5411,7 @@ class Game {
     // torch / lava ambient particles near player
     this.ambientParticles();
     Sound.listener = { x: p.pos[0], y: p.pos[1] + 1.6, z: p.pos[2], yaw: p.yaw };
+    if (typeof HUD !== 'undefined' && this.touchMode) HUD.refreshHotbar();
   }
   readInput() {
     const k = this.keys;
@@ -7154,6 +7187,114 @@ function toggleFullscreen() {
 }
 </script>
 <script>
+
+// ===== hud.js =====
+'use strict';
+// ---------------------------------------------------------------------------
+// 轻量 DOM 快捷栏 HUD：与 game.player.inv 同步，支持触屏点击和三击丢弃
+// ---------------------------------------------------------------------------
+const HUD = {
+  game: null, slots: [],
+  init(game) {
+    this.game = game;
+    const hb = document.getElementById('hotbar');
+    if (!hb) return;
+    hb.innerHTML = '';
+    this.slots = [];
+    for (let i = 0; i < 9; i++) {
+      const d = document.createElement('div');
+      d.className = 'slot';
+      const num = document.createElement('span'); num.className = 'num'; num.textContent = String(i + 1);
+      d.appendChild(num);
+      d.addEventListener('touchstart', (e) => {
+        if (!this.game || !this.game.touchMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.game.ui && this.game.ui.screen) return;
+        this.game.player.inv.sel = i;
+        this.refreshHotbar();
+        this.onSlotTap(i);
+      }, { passive: false });
+      hb.appendChild(d);
+      this.slots.push(d);
+    }
+    this.refreshHotbar();
+  },
+  refreshHotbar() {
+    const g = this.game;
+    if (!g || !g.player) return;
+    const inv = g.player.inv;
+    for (let i = 0; i < 9; i++) {
+      const el = this.slots[i];
+      if (!el) continue;
+      el.classList.toggle('sel', i === inv.sel);
+      const st = inv.slots[i];
+      // 图标：优先用 renderer.iconAtlas 画到小 canvas
+      let cv = el.querySelector('canvas.icon');
+      if (!st) {
+        if (cv) cv.remove();
+        continue;
+      }
+      if (!cv) {
+        cv = document.createElement('canvas');
+        cv.width = 64; cv.height = 64;
+        cv.className = 'icon';
+        el.appendChild(cv);
+      }
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, 64, 64);
+      const r = g.renderer;
+      if (r && r.iconAtlas) {
+        const S = r.iconSize || 64, cols = r.iconCols || 32;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(r.iconAtlas, (st.id % cols) * S, Math.floor(st.id / cols) * S, S, S, 4, 4, 56, 56);
+      }
+      if (st.count > 1) {
+        ctx.font = 'bold 18px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#000'; ctx.fillText(String(st.count), 4, 60);
+        ctx.fillStyle = '#fff'; ctx.fillText(String(st.count), 3, 59);
+      }
+    }
+  },
+  onSlotTap(slotIndex) {
+    const now = performance.now();
+    if (slotIndex !== this._tapSlot || now - this._tapTimer > 400) {
+      this._tapCount = 0;
+      this._tapSlot = slotIndex;
+    }
+    this._tapTimer = now;
+    this._tapCount++;
+    if (this._tapCount >= 3) {
+      this._tapCount = 0;
+      this.dropOneFromSlot(slotIndex);
+    } else {
+      if (typeof Sound !== 'undefined' && Sound.click) Sound.click();
+    }
+  },
+  dropOneFromSlot(slotIndex) {
+    const g = this.game;
+    if (!g || !g.player) return;
+    const s = g.player.inv.slots[slotIndex];
+    if (!s || s.count <= 0) return;
+    if (g.dropFromPlayer) {
+      g.dropFromPlayer({ id: s.id, count: 1, dmg: s.dmg || 0 });
+    } else {
+      const p = g.player;
+      const dir = g.lookDir ? g.lookDir() : [0, 0, -1];
+      const e = g.dropItem(
+        p.pos[0], p.pos[1] + p.eye() - 0.3, p.pos[2],
+        { id: s.id, count: 1, dmg: s.dmg || 0 },
+        [dir[0] * 0.3, dir[1] * 0.3 + 0.1, dir[2] * 0.3]
+      );
+      if (e) e.pickup = 40;
+    }
+    s.count--;
+    if (s.count <= 0) g.player.inv.slots[slotIndex] = null;
+    this.refreshHotbar();
+    if (typeof Sound !== 'undefined' && Sound.pop) Sound.pop(g.player.pos);
+  },
+};
+
 // ===== main.js =====
 'use strict';
 // ---------------------------------------------------------------------------
@@ -7219,11 +7360,14 @@ const Touch = {
     this.enabled = on;
     g.touchMode = on;
     document.body.classList.toggle('touch', on);
+
+    const visible = on && (g.state === 'play');
     const el = document.getElementById('mobileUI');
     if (el) {
-      el.classList.toggle('hidden', !on);
-      el.style.display = on ? 'block' : 'none';
+      el.classList.toggle('hidden', !visible);
+      el.style.display = visible ? 'block' : 'none';
     }
+
     if (on) {
       this.bindButtons(g);
       g.suppressPause = true;
@@ -7246,6 +7390,16 @@ const Touch = {
     this.syncButton();
   },
 
+  refreshVisibility() {
+    const g = this.game; if (!g) return;
+    const visible = this.enabled && (g.state === 'play');
+    const el = document.getElementById('mobileUI');
+    if (el) {
+      el.classList.toggle('hidden', !visible);
+      el.style.display = visible ? 'block' : 'none';
+    }
+  },
+
   bindCanvas(g) {
     const cv = g.canvas;
     cv.addEventListener('touchstart', (e) => {
@@ -7260,9 +7414,11 @@ const Touch = {
       if (!this.enabled || g.ui.screen || g.state !== 'play') return;
       for (const t of e.changedTouches) {
         if (t.identifier === this.lookId) {
-          const s = g.settings.sens * 0.06 + 0.002;
-          g.player.yaw   -= (t.clientX - this.lx) * s;
-          g.player.pitch  = clamp(g.player.pitch - (t.clientY - this.ly) * s, -Math.PI/2+0.001, Math.PI/2-0.001);
+          const dx = t.clientX - this.lx, dy = t.clientY - this.ly;
+          const s = 0.022;   // 手机触屏固定灵敏度
+          if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { this.lx = t.clientX; this.ly = t.clientY; return; }
+          g.player.yaw   -= dx * s;
+          g.player.pitch  = clamp(g.player.pitch - dy * s, -Math.PI/2+0.001, Math.PI/2-0.001);
           this.lx = t.clientX; this.ly = t.clientY;
         }
       }
