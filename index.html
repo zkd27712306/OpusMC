@@ -6339,7 +6339,7 @@ class Game {
     if (typeof Touch !== 'undefined' && Touch.enabled) {
       const el = document.getElementById('mobileUI');
       if (el) {
-        const show = this.state === 'play' && !this.ui.screen;
+        const show = this.state === 'play';
         el.classList.toggle('hidden', !show);
         el.style.display = show ? 'block' : 'none';
       }
