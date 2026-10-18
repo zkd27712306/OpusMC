@@ -4986,7 +4986,7 @@ const TUTORIAL = [
 class Game {
   constructor() {
     this.settings = Object.assign({
-      fov: 70, renderDist: 8, sens: 0.35, touchSens: 0.2,
+      fov: 70, renderDist: 8, sens: 0.35,
       volume: 0.8, music: 0.45, gamma: 0.5, guiScale: 0,
       clouds: true, bobbing: true, advTooltips: false, resScale: 1
     }, this.loadSettings());
@@ -7227,7 +7227,7 @@ const Touch = {
     if (hb) hb.style.bottom = document.body.classList.contains('touch') ? '76px' : '8px';
   },
   
-  setEnabled(on) {
+    setEnabled(on) {
     const g = this.game; if (!g) return;
     on = !!on;
     this.enabled = on;
@@ -7235,24 +7235,30 @@ const Touch = {
     document.body.classList.toggle('touch', on);
     const el = document.getElementById('mobileUI');
     if (el) {
-      el.classList.toggle('hidden', !on);
-      el.style.display = on ? 'block' : 'none';
+      const show = on && g.state === 'play';
+      el.classList.toggle('hidden', !show);
+      el.style.display = show ? 'block' : 'none';
     }
     if (on) {
       this.bindButtons(g);
       g.suppressPause = true;
       const dpr = window.devicePixelRatio || 1;
       g.settings.resScale = dpr >= 3 ? 0.5 : (dpr >= 2 ? 0.66 : 0.8);
-      g.applySettings();
-      g.resize();
       if (!g.settings._origRenderDist) g.settings._origRenderDist = g.settings.renderDist;
       g.settings.renderDist = Math.min(g.settings._origRenderDist, 4);
+      if (g.settings._origSens === undefined) g.settings._origSens = g.settings.sens;
+      g.settings.sens = Math.min(g.settings._origSens, 0.12);
       g.applySettings();
+      g.resize();
     } else {
       g.settings.resScale = 1;
       if (g.settings._origRenderDist) {
         g.settings.renderDist = g.settings._origRenderDist;
         g.settings._origRenderDist = 0;
+      }
+      if (g.settings._origSens !== undefined) {
+        g.settings.sens = g.settings._origSens;
+        g.settings._origSens = undefined;
       }
       g.applySettings();
       g.resize();
@@ -7260,7 +7266,7 @@ const Touch = {
     this.syncButton();
   },
 
-  bindCanvas(g) {
+    bindCanvas(g) {
     const cv = g.canvas;
 
     // ---- 快捷栏点击层（手机专用，一次性创建）----
@@ -7313,8 +7319,8 @@ const Touch = {
       if (!this.enabled || g.ui.screen || g.state !== 'play') return;
       for (const t of e.changedTouches) {
         if (t.identifier === this.lookId) {
-          // 手机独立灵敏度
-          const s = (g.settings.touchSens || 0.6) * 0.06 + 0.0008;
+          // 与电脑同一套 sens（手机在 setEnabled 里已降到 0.12）
+          const s = g.settings.sens * 0.006 + 0.0006;
           g.player.yaw   -= (t.clientX - this.lx) * s;
           g.player.pitch  = clamp(g.player.pitch - (t.clientY - this.ly) * s, -Math.PI/2+0.001, Math.PI/2-0.001);
           this.lx = t.clientX; this.ly = t.clientY;
@@ -7326,6 +7332,63 @@ const Touch = {
     const end = (e) => { for (const t of e.changedTouches) if (t.identifier === this.lookId) this.lookId = null; };
     cv.addEventListener('touchend', end);
     cv.addEventListener('touchcancel', end);
+
+    // ---- 触屏驱动 UI（背包/箱子/熔炉）----
+    const uic = g.ui.canvas;
+    let lpTimer = null, lpFired = false;
+
+    uic.addEventListener('touchstart', (e) => {
+      if (!this.enabled || !g.ui.screen) return;
+      const t = e.changedTouches[0];
+      const r = uic.getBoundingClientRect();
+      const scale = g.ui.dpr / g.ui.scale;
+      g.ui.mouse.x = (t.clientX - r.left) * scale;
+      g.ui.mouse.y = (t.clientY - r.top) * scale;
+      g.ui.mouse.down = true;
+      g.ui.mouse.button = 0;
+      lpFired = false;
+      if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0, false);
+      if (lpTimer) clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => {
+        if (!g.ui.screen || !g.ui.mouse.down) return;
+        lpFired = true;
+        // 长按 = 右键（拿一半 / 放一半）
+        if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0);
+        if (g.ui.screen.mouseDown) g.ui.screen.mouseDown(g.ui, g.ui.mouse.x, g.ui.mouse.y, 2, false);
+      }, 400);
+      e.preventDefault();
+    }, { passive: false });
+
+    uic.addEventListener('touchmove', (e) => {
+      if (!this.enabled || !g.ui.screen) return;
+      const t = e.changedTouches[0];
+      const r = uic.getBoundingClientRect();
+      const scale = g.ui.dpr / g.ui.scale;
+      const nx = (t.clientX - r.left) * scale;
+      const ny = (t.clientY - r.top) * scale;
+      // 移动超过 6px 视为拖动，取消长按
+      if (Math.abs(nx - g.ui.mouse.x) + Math.abs(ny - g.ui.mouse.y) > 6 && lpTimer) {
+        clearTimeout(lpTimer); lpTimer = null;
+      }
+      g.ui.mouse.x = nx; g.ui.mouse.y = ny;
+      if (g.ui.screen.mouseMove) g.ui.screen.mouseMove(g.ui, nx, ny);
+      e.preventDefault();
+    }, { passive: false });
+
+    uic.addEventListener('touchend', (e) => {
+      if (!this.enabled || !g.ui.screen) return;
+      if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+      g.ui.mouse.down = false;
+      if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, lpFired ? 2 : 0);
+      e.preventDefault();
+    }, { passive: false });
+
+    uic.addEventListener('touchcancel', () => {
+      if (!this.enabled || !g.ui.screen) return;
+      if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+      g.ui.mouse.down = false;
+      if (g.ui.screen.mouseUp) g.ui.screen.mouseUp(g.ui, g.ui.mouse.x, g.ui.mouse.y, 0);
+    });
   },
 
   bindButtons(g) {
