@@ -7212,15 +7212,7 @@ const Touch = {
     if (b) b.textContent = this.pref === 'auto' ? '自动' : (this.pref === 'on' ? '开' : '关');
     if (v) v.textContent = this.enabled ? '已开启' : '已关闭';
   },
-
-  setEnabled(on) {
-    const g = this.game; if (!g) return;
-    on = !!on;
-    if (on === this.enabled) { this.syncButton(); return; }
-    this.enabled = on; g.touchMode = on;
-    document.body.classList.toggle('touch', on);
-    const el = document.getElementById('mobileUI');
-    if (el) el.classList.toggle('hidden', !on);
+  
   setEnabled(on) {
     const g = this.game; if (!g) return;
     on = !!on;
