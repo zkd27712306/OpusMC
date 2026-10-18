@@ -7247,7 +7247,7 @@ const Touch = {
       if (!g.settings._origRenderDist) g.settings._origRenderDist = g.settings.renderDist;
       g.settings.renderDist = Math.min(g.settings._origRenderDist, 4);
       if (g.settings._origSens === undefined) g.settings._origSens = g.settings.sens;
-      g.settings.sens = Math.min(g.settings._origSens, 2.0);
+      g.settings.sens = Math.min(g.settings._origSens, 0.5);
       g.applySettings();
       g.resize();
     } else {
@@ -7320,8 +7320,7 @@ const Touch = {
       if (!this.enabled || g.ui.screen || g.state !== 'play') return;
       for (const t of e.changedTouches) {
         if (t.identifier === this.lookId) {
-          // 与电脑同一套 sens（手机在 setEnabled 里已降到 0.12）
-          const s = g.settings.sens * 0.006 + 0.0006;
+          const s = g.settings.sens * 0.03 + 0.003;
           g.player.yaw   -= (t.clientX - this.lx) * s;
           g.player.pitch  = clamp(g.player.pitch - (t.clientY - this.ly) * s, -Math.PI/2+0.001, Math.PI/2-0.001);
           this.lx = t.clientX; this.ly = t.clientY;
