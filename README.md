@@ -127,8 +127,10 @@ OpusMC/
 
 game/js/assets.js 已随仓库提供。如需从自己的游戏文件重新生成（需要 Python 3 和 Pillow）：
 
+```
 pip install pillow
 py tools/build_assets.py "<.minecraft>/versions/26.2/26.2.jar"
+```
 
 ## 许可与声明
 
